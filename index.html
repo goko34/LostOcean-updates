@@ -515,7 +515,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-
       </div>
       <span class="saveInfo" id="saveInfo" hidden></span>
       <button class="btnMain" id="btnStart">Denize açıl</button>
-      <span class="build">Sürüm 27 · meteor dağılımı + Kızıl Hayalet görevi<span id="verTag"></span></span>
+      <span class="build">Sürüm 30 · hayalet filo + Siyah İnci<span id="verTag"></span></span>
     </div>
   </div>
 </div>
@@ -562,8 +562,9 @@ const MAXLV=50;
 const TIER_LV=[1,8,18,30,42];
 const tierOf=lv=>{let t=0;for(let i=1;i<TIER_LV.length;i++)if(lv>=TIER_LV[i])t=i;return t;};
 // upgrades are percentage boosts on top of the level base, so a level gap can't be bought away with cheap ranks
-function playerStats(lv,up){return{speed:9+0.09*(lv-1)+0.2*up.s,hp:Math.round((100+14*(lv-1))*(1+0.025*up.h)),reload:Math.max(0.75,(2.6-0.03*(lv-1))*(1-0.012*up.r)),dmg:Math.round((8+0.9*(lv-1))*(1+0.025*up.d)*10)/10,tier:tierOf(lv)};}
-function enemyStats(lv){return{speed:6.6+0.14*lv,hp:Math.round((100+14*(lv-1))*Math.min(1.6,0.72+0.018*lv)),reload:Math.max(1.5,3.1-0.035*lv),dmg:3.4+0.85*lv,tier:tierOf(lv)};}
+const SPD_K=1.4; // base sailing speed of every ship, player and enemy alike
+function playerStats(lv,up){return{speed:(9+0.09*(lv-1)+0.2*up.s)*SPD_K,hp:Math.round((100+14*(lv-1))*(1+0.025*up.h)),reload:Math.max(0.75,(2.6-0.03*(lv-1))*(1-0.012*up.r)),dmg:Math.round((8+0.9*(lv-1))*(1+0.025*up.d)*10)/10,tier:tierOf(lv)};}
+function enemyStats(lv){return{speed:(6.6+0.14*lv)*SPD_K,hp:Math.round((100+14*(lv-1))*Math.min(1.6,0.72+0.018*lv)),reload:Math.max(1.5,3.1-0.035*lv),dmg:3.4+0.85*lv,tier:tierOf(lv)};}
 // every level of difference shifts damage 10% both ways: 10 levels up = ~2.6x damage taken, ~40% damage dealt
 const lvOf=sh=>sh.isPlayer?save.level:(sh.level||1);
 const lvMult=(a,d)=>clamp(Math.pow(1.1,lvOf(a)-lvOf(d)),0.25,4);
@@ -626,8 +627,7 @@ const wallTime=()=>Date.now()/1000;
    Görünür olduklarında updateMatrix() matrixWorldNeedsUpdate'i işaretlediği için doğru konuma gelirler. */
 {const umw=THREE.Object3D.prototype.updateMatrixWorld;THREE.Object3D.prototype.updateMatrixWorld=function(f){if(this.visible===false)return;umw.call(this,f);};}
 const canvas=$('gl');
-/* telefonlarda MSAA her zaman açık: döşeme tabanlı mobil GPU'larda neredeyse bedava, kenar tırtıklarını (piksel görünümünü) giderir */
-const renderer=new THREE.WebGLRenderer({canvas,antialias:quality===1||matchMedia('(pointer: coarse)').matches,powerPreference:'high-performance'});
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
 const scene=new THREE.Scene();
 const fogCol=BANDS[0].fog.clone();
 scene.background=fogCol;
@@ -637,6 +637,7 @@ const hemi=new THREE.HemisphereLight(0xd8f3ff,0x3d6b5c,0.78);scene.add(hemi);
 const sun=new THREE.DirectionalLight(0xfff0d2,0.95);
 const SUN_DIR=new V3(-0.5,0.78,0.38).normalize();
 scene.add(sun);scene.add(sun.target);
+const SH_R=new V3().crossVectors(new V3(0,1,0),SUN_DIR).normalize(),SH_U=new V3().crossVectors(SUN_DIR,SH_R).normalize();
 const IS_TOUCH=matchMedia('(pointer: coarse)').matches;
 const PERF={base:1,scale:1,min:0.6,acc:0,n:0,cool:0,shadowF:0,cap:false,slow:0,lastDraw:0,wk:0,lastWork:0,minDt:1,playT:0};
 const isLite=()=>IS_TOUCH&&!quality;
@@ -655,15 +656,17 @@ function perfTick(raw){if(document.hidden||raw>0.25||PERF.hold)return;if(playing
       if(quality&&lsGet('qLock','0')!=='1'){quality=0;lsSet('q','0');lsSet('qAuto','1');applyQuality();buildOcean();initWake();toast('Grafik akıcılık için <b>düşük</b> kaliteye alındı · ayarlardan değiştirebilirsin',null);return;}
       PERF.cap=true;}}else PERF.slow=0;
   if(ns!==PERF.scale){if(ns>PERF.scale)PERF.cool=2.5;PERF.scale=ns;renderer.setPixelRatio(PERF.base*ns);resize();}}
+// render near the screen's own density (capped by a pixel budget) so nothing is upscaled into blocks
+function perfBase(){const dpr=window.devicePixelRatio||1;const cap=quality?2:(IS_TOUCH?1.5:1.25);const budget=quality?(IS_TOUCH?2.4e6:4.2e6):(IS_TOUCH?1.6e6:2.2e6);
+  PERF.base=Math.max(1,Math.min(dpr,cap,Math.sqrt(budget/Math.max(1,innerWidth*innerHeight))));}
 function applyQuality(){
-  const dpr=window.devicePixelRatio||1;
-  PERF.base=Math.min(dpr,quality?1.75:(IS_TOUCH?1.5:1.0));
+  perfBase();
   /* tam netlikte başla, yalnızca gerçekten yavaşsa düş; telefonda asla 1 CSS pikselinin altına inme (altı pikselli görünüyor, işlemci darboğazında da hız kazandırmıyor) */
   PERF.min=IS_TOUCH?Math.min(1,1/PERF.base):(quality?0.55:0.7);
   PERF.scale=PERF.inited?clamp(PERF.scale,PERF.min,1):1;PERF.inited=true;PERF.cap=false;PERF.slow=0;PERF.playT=0;renderer.setPixelRatio(PERF.base*PERF.scale);
   if(isLite())oceanMat.defines.LITE=1;else delete oceanMat.defines.LITE;
   renderer.shadowMap.enabled=!!quality;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-  sun.castShadow=!!quality;sun.shadow.mapSize.set(2048,2048);
+  sun.castShadow=!!quality;{const ms=!IS_TOUCH&&renderer.capabilities.maxTextureSize>=4096?4096:2048;if(sun.shadow.mapSize.x!==ms){sun.shadow.mapSize.set(ms,ms);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}}}sun.shadow.normalBias=0.35;
   const c=sun.shadow.camera;c.left=-shadowHalf;c.right=shadowHalf;c.top=shadowHalf;c.bottom=-shadowHalf;c.near=10;c.far=2*(shadowHalf+170);c.updateProjectionMatrix();sun.shadow.bias=-0.0008;
   scene.traverse(o=>{if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>m.needsUpdate=true);}});
   if(quality)oceanMat.defines.HQ=1;else delete oceanMat.defines.HQ;oceanMat.needsUpdate=true;
@@ -738,7 +741,7 @@ const oceanMat=new THREE.ShaderMaterial({
   vec3 H=normalize(uSun+V);float nh=max(dot(n,H),0.0);
   float sp=pow(nh,300.0)*1.2;
   #ifdef HQ
-  float gl=step(0.93,vn(p*2.6+vec2(uTime*1.7,-uTime*1.3)))*pow(nh,30.0)*1.4;
+  float gd=length(cameraPosition-vW);float gl=smoothstep(0.9,0.96,vn(p*2.6+vec2(uTime*1.7,-uTime*1.3)))*pow(nh,30.0)*1.4*(1.0-smoothstep(70.0,190.0,gd));
   #else
   float gl=0.0;
   #endif
@@ -945,9 +948,9 @@ const SHIP_CLASSES=[
   desc:'Kırmızı gövdeli, dört ambarlı yüzen kale. Her bordada iki fazla top ve kalın gövde, fırtınada sağlam; ama en ağır hareket eden savaş gemisi.',perk:'Yüzen kale: her bordada +2 top',
   spd:0.78,hp:1.38,turn:0.56,acc:0.55,rel:1.15,dmg:0.9,storm:0.7,whirl:1.25,spout:0.7,cps:2,rng:1,
   look:{L:1.24,W:1.2,H:1.6,s:1.14,mh:1.08,hull:{prof:'war',b0:0.48,tm:0.48,tb:0.15,zb:0.88,shB:0.8,shS:1.0},rows:[1,2,2,3,4],masts:[2,3,3,3,3],hullCol:0x8c2a1d,stripe:0x161414,bottom:0x8a5634,sail:0xe8dcc2,ensign:'es',lid:0x161414}},
- {id:'efsane',kind:'square',locked:true,name:'Kızıl Hayalet',short:'Efsane',era:'Efsanevi gemi · görev: 4 krallık fethet',
-  tiers:['Kızıl Hayalet','Kızıl Hayalet','Kızıl Hayalet','Kızıl Hayalet','Kızıl Hayalet'],
-  desc:'Denizcilerin fısıltıyla andığı lanetli kalyon: lime lime kızıl yelkenler, yosun tutmuş çürük gövde, soluk hayalet fenerleri. Korsan yolunun efsanevi son durağı.',perk:'Lanetli rüzgâr: hızlı, dayanıklı ve hava olaylarına neredeyse kayıtsız',
+ {id:'efsane',kind:'square',locked:true,name:'Siyah İnci',short:'Efsane',era:'Efsanevi gemi · görev: 4 krallık fethet',
+  tiers:['Siyah İnci','Siyah İnci','Siyah İnci','Siyah İnci','Siyah İnci'],
+  desc:'Denizcilerin fısıltıyla andığı lanetli kalyon: lime lime kızıl yelkenler, yosun tutmuş çürük gövde, soluk hayalet fenerleri. Korsan yolunun efsanevi son durağı. Yanında iki hayalet gemiyle üçgen düzende yol alır.',perk:'Hayalet filo: iki hayalet gemi eşlik eder ve senin hedeflerine ateş eder · hızlı, dayanıklı, hava olaylarına neredeyse kayıtsız',
   spd:1.18,hp:1.3,turn:1.05,acc:1.15,rel:0.9,dmg:1.15,storm:0.5,whirl:0.5,spout:0.5,cps:1,rng:1.1,
   look:{L:1.22,W:1.06,H:1.2,s:1.1,mh:1.08,hull:{prof:'war',b0:0.5,tm:0.55,tb:0.1,zb:0.86,shB:1.0,shS:1.3},rows:[2,2,2,2,2],masts:[3,3,3,3,3],hullCol:0x3d342c,stripe:0x7d6e48,bottom:0x29291f,sail:0x7a201c,lid:0x2a231e,legend:1,tattered:1}}
 ];
@@ -2101,7 +2104,7 @@ function cTree(k,S,x,y,z,sc,R_){k.leaf.push({geo:CYL(0.16*sc,0.24*sc,2.2*sc,5),c
   else if(S.tree==='cypress')k.leaf.push({sway:0.22,geo:new THREE.ConeGeometry(0.8*sc,6.2*sc,7),color:0x2f5a34,m:M(x,y+4.3*sc,z)});
   else{const col=S.tree==='blossom'?(R_()<0.5?0xe8a6b8:0xf2c6d2):[0x5aa53e,0x6cb446,0x4e9a3a][(R_()*3)|0];k.leaf.push({sway:0.28,geo:new THREE.IcosahedronGeometry(1.7*sc,1),color:col,m:M(x,y+2.9*sc,z,0,0,0,1,0.85,1)});}}
 function cRoad(k,col,pts,w,isl){for(let i=0;i<pts.length-1;i++){const a=pts[i],b=pts[i+1];const dx=b[0]-a[0],dz=b[1]-a[1];const len=Math.hypot(dx,dz);if(len<0.2)continue;const mx=(a[0]+b[0])/2,mz=(a[1]+b[1])/2;
-  const y=Math.max(isl.h(a[0],a[1]),isl.h(b[0],b[1]),isl.h(mx,mz));k.leaf.push({geo:BOX(w,0.16,len+0.3),color:col,jit:0.05,m:M(mx,y+0.06,mz,0,Math.atan2(dx,dz),0)});}}
+  const y=Math.max(isl.h(a[0],a[1]),isl.h(b[0],b[1]),isl.h(mx,mz));k.leaf.push({geo:BOX(w,0.16,len+0.3),color:col,jit:0.05,m:M(mx,y+0.16,mz,0,Math.atan2(dx,dz),0)});}}
 /* ---- keeps: (cx,cz) is the upper ward centre, +lx points at the gate ---- */
 function keepViking(k,S,cx,cz,y,gate){const L=LF(cx,cz,gate),rot=-gate;
   const hall=(x,z,ry,len,w)=>{k.wood.push({geo:BOX(w,2.8,len),color:S.wood,m:M(x,y+1.4,z,0,ry,0)});
@@ -2234,7 +2237,7 @@ function buildCastleModel(E,isl){const k=ck();k.leaf=[];const t=ck();t.leaf=[];c
   {const lanes=[];for(let j=0;j<6;j++)lanes.push(gate+Math.PI/6+j*Math.PI/3);
     const ring=[];for(let i=0;i<=80;i++){const a=gate+0.16+i/80*(Math.PI*2-0.32);const r=ringR(a)-7;ring.push([Math.cos(a)*r,Math.sin(a)*r]);}cRoad(t,S.ground,ring,3.4,isl);
     const g0=ir+mx*gc+mz*gs+7,g1=gr-3;const groad=[];for(let i=0;i<=12;i++){const s=lerp(g0,g1,i/12);groad.push([gc*s,gs*s]);}cRoad(t,S.ground,groad,5,isl);
-    const sqS=lerp(g0,g1,0.5),sq=[gc*sqS,gs*sqS],sqR=10;t.leaf.push({geo:CYL(sqR,sqR,0.22,28),color:S.ground,jit:0.04,m:M(sq[0],P1+0.05,sq[1])});
+    const sqS=lerp(g0,g1,0.5),sq=[gc*sqS,gs*sqS],sqR=10;t.leaf.push({geo:CYL(sqR,sqR,0.22,28),color:S.ground,jit:0.04,m:M(sq[0],P1+0.2,sq[1])});
     t.stone.push({geo:CYL(2.2,2.4,0.9,16),color:dk(S.stone,0.95),m:M(sq[0],P1+0.45,sq[1])});t.stone.push({geo:CYL(0.35,0.45,2.6,8),color:S.stone,m:M(sq[0],P1+1.3,sq[1])});t.stone.push({geo:CYL(1.1,0.3,0.4,12),color:S.stone,m:M(sq[0],P1+2.6,sq[1])});
     const inMound=(x,z,pad)=>{const dx=x-mx,dz=z-mz;return Math.hypot(dx,dz)<isl.rm*isl.rmF(Math.atan2(dz,dx))*1.14+pad;};
     for(const la of lanes){const c=Math.cos(la),s=Math.sin(la);let s0=4;while(s0<R&&inMound(c*s0,s*s0,1))s0+=1;const s1=ringR(la)-8;if(s1-s0<6)continue;const ln=[];for(let i=0;i<=8;i++){const q=lerp(s0,s1,i/8);ln.push([c*q,s*q]);}cRoad(t,S.ground,ln,2.6,isl);}
@@ -2289,7 +2292,7 @@ function castleFall(C,mine){if(!C.alive)return;C.alive=false;C.hp=0;C.fallT=T;C.
   if(part){const n=8;for(let i=0;i<n;i++){const a=i/n*Math.PI*2+rnd(-0.2,0.2);const r=C.E.isl.R*1.25+rnd(4,14);dropChest(C.x+Math.cos(a)*r,C.z+Math.sin(a)*r,Math.round(C.loot/n));}
     toast(`<b>${C.E.castle} düştü!</b> Hazinesi ${n} sandık halinde kıyıda · toplam <b>${C.loot}</b> altın`,'good');save.castles=(save.castles||0)+1;
     if(!Array.isArray(save.conq))save.conq=[];if(!save.conq.includes(C.E.id)){save.conq.push(C.E.id);const c=save.conq.length;
-      setTimeout(()=>toast(c>=LEG_NEED?(legOwned()?`Fethedilen krallık: <b>${c}</b>`:`<b>Görev tamam!</b> ${c} krallık fethettin · Kızıl Hayalet artık lobide <b>${LEG_PRICE.toLocaleString('tr-TR')}</b> altına satın alınabilir`):`Görev · Krallık fethet: <b>${c}/${LEG_NEED}</b> (${C.E.name})`,'good'),1600);}
+      setTimeout(()=>toast(c>=LEG_NEED?(legOwned()?`Fethedilen krallık: <b>${c}</b>`:`<b>Görev tamam!</b> ${c} krallık fethettin · Siyah İnci artık lobide <b>${LEG_PRICE.toLocaleString('tr-TR')}</b> altına satın alınabilir`):`Görev · Krallık fethet: <b>${c}/${LEG_NEED}</b> (${C.E.name})`,'good'),1600);}
     persist();}
   else if(near<1400)toast(`<b>${C.E.castle}</b> başka kaptanlar tarafından düşürüldü`,null);}
 function castleRestore(C){C.alive=true;C.hp=C.maxHp;if(C.built){C.full.visible=true;if(C.ruin)C.ruin.visible=false;}for(const g of C.guns)g.cd=rnd(2,6);if(Math.hypot(C.x-player.pos.x,C.z-player.pos.z)<900)toast(`<b>${C.E.castle}</b> yeniden inşa edildi`,'bad');}
@@ -2348,16 +2351,16 @@ function makeArcs(range){
   const mk=st=>{const geo=new THREE.RingGeometry(5,range,28,1,st,THREE.MathUtils.degToRad(80));geo.rotateX(-Math.PI/2);const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0xfff2c8,transparent:true,opacity:0.06,depthWrite:false,side:THREE.DoubleSide,fog:false}));m.position.y=1.35;m.renderOrder=3;g.add(m);return m;};
   return{g,port:mk(THREE.MathUtils.degToRad(-40)),stbd:mk(THREE.MathUtils.degToRad(140))};
 }
-function effSpeed(sh){let m=1;if(sh.slowT>0)m*=0.5;if(sh.holdT>0)m=0;if(sh.isPlayer){if(U.ramT>0)m*=2.4;if(U.ghostT>0)m*=1.4;}return sh.speedMax*m;}
+function effSpeed(sh){let m=1;if(sh.slowT>0)m*=0.5;if(sh.holdT>0)m=0;if(sh.isPlayer){if(U.ramT>0)m*=2.0;if(U.ghostT>0)m*=1.4;}return sh.speedMax*m;}
 function shipPhysics(sh,throttle,turn,dt){
   const Cc=sh.cls||SHIP_CLASSES[0];const st0=stormAt(sh.pos.x,sh.pos.z);sh.storm=st0;const st=st0*Cc.storm;
   const ramming=sh.isPlayer&&U.ramT>0;
-  const accel=(3.4-sh.tier*0.35)*Cc.acc*(ramming?4:1),decel=2.6;
+  const accel=(6.2-sh.tier*0.5)*Math.pow(Cc.acc,0.7)*(ramming?4:1),decel=3.8;
   const target=throttle*effSpeed(sh);
   sh.speed+=clamp(target-sh.speed,-decel*dt*(sh.holdT>0?4:1),accel*dt);
   const sf=Math.min(1,Math.abs(sh.speed)/(sh.speedMax*0.55));
-  let turnMax=(0.95-sh.tier*0.08)*Cc.turn*(0.3+0.7*sf)*(1-0.4*Math.min(1,st));if(sh.slowT>0)turnMax*=0.4;if(sh.holdT>0)turnMax=0;
-  sh.angVel+=(turn*turnMax-sh.angVel)*Math.min(1,dt*2.2);
+  let turnMax=(1.15-sh.tier*0.08)*Math.pow(Cc.turn,0.8)*(0.3+0.7*sf)*(1-0.4*Math.min(1,st));if(sh.slowT>0)turnMax*=0.4;if(sh.holdT>0)turnMax=0;
+  sh.angVel+=(turn*turnMax-sh.angVel)*Math.min(1,dt*3);
   if(st>0.05){const g=(noise2(T*0.45+sh.gustPh,sh.gustPh)-0.5)*2;sh.angVel+=g*st*1.6*dt;}
   sh.heading=wrapA(sh.heading+sh.angVel*dt);
   const ox=sh.pos.x,oz=sh.pos.z;
@@ -2428,7 +2431,7 @@ function shootFrom(sh,c,ax,az,opts){
   const dirx=c.side*Math.cos(sh.heading),dirz=-c.side*Math.sin(sh.heading);
   c.recoil=1;if(nearCam(_v))fxMuzzle(_v,{x:dirx,z:dirz});
   if(T-sh.lastBoom>0.1){sh.lastBoom=T;const vb=Math.min(1.3,0.6+0.12*(sh.volleyN||2));sfx('boom',vol3d(_v)*(sh.isPlayer?0.95:0.8)*vb);if((sh.volleyN||2)>=3)setTimeout(()=>sfx('boom',vol3d(_v)*0.55),40);}
-  const vh=opts.sonic?150:48;const hd=Math.hypot(ax-_v.x,az-_v.z)||1;const t2=hd/vh;const g=opts.sonic?2:18;const aimY=opts.aimY!==undefined?opts.aimY:opts.sonic?1.2:0.6+rnd(-0.3,0.8);
+  const vh=opts.sonic?150:60;const hd=Math.hypot(ax-_v.x,az-_v.z)||1;const t2=hd/vh;const g=opts.sonic?2:18;const aimY=opts.aimY!==undefined?opts.aimY:opts.sonic?1.2:0.6+rnd(-0.3,0.8);
   spawnBall(_v.x,_v.y,_v.z,(ax-_v.x)/hd*vh,(aimY-_v.y+0.5*g*t2*t2)/t2,(az-_v.z)/hd*vh,sh,Object.assign({grav:g},opts));
 }
 function processPending(){
@@ -2437,7 +2440,7 @@ function processPending(){
     const tg=p.target;if(!tg.alive&&!p.visual)continue;
     if(p.visual){shootFrom(sh,p.c,p.ax+rnd(-3,3),p.az+rnd(-3,3),{visual:true,sonic:p.sonic});continue;}
     _v.copy(p.c.muzzle);sh.model.body.localToWorld(_v);
-    const sonic=sh.isPlayer&&U.sonicT>0;const vh=sonic?150:48;
+    const sonic=sh.isPlayer&&U.sonicT>0;const vh=sonic?150:60;
     const dist=Math.hypot(tg.pos.x-_v.x,tg.pos.z-_v.z);const tt=dist/vh;
     const along=rnd(-0.38,0.38)*tg.L;const spread=(sonic?0.3:0.8+dist*0.035);
     const ax=tg.pos.x+tg.vel.x*tt+Math.sin(tg.heading)*along+rnd(-spread,spread),az=tg.pos.z+tg.vel.z*tt+Math.cos(tg.heading)*along+rnd(-spread,spread);
@@ -2461,9 +2464,9 @@ function updateBalls(dt){
     if(b.o.burn&&Math.random()<0.7)glow.spawn(b.p.x,b.p.y,b.p.z,0,0.5,0,0.3,1.4,0.4,1,0.5,0.15,0.9,0,0);
     if(b.o.big&&sub===0){smoke.spawn(b.p.x,b.p.y,b.p.z,0,0.4,0,1.1,1.6,2.2,0.8,0.8,0.78,0.55,0,0);if(Math.random()<0.6)glow.spawn(b.p.x,b.p.y,b.p.z,0,0,0,0.6,1,0.3,1,0.6,0.25,0.8,0,0);}
     if(b.o.visual){const tl=[player,...enemies,...ghosts.values()];for(const sh of tl){if(!sh.alive||sh.sinking||sh===b.owner)continue;if(Math.abs(sh.pos.x-b.p.x)>sh.L||Math.abs(sh.pos.z-b.p.z)>sh.L)continue;if(hitTest(sh,b.p)){fxHit(b.p);sfx('hit',vol3d(b.p)*0.7);done=true;break;}}}
-    else{const targets=b.owner.isPlayer?playerTargets():[player];
-      for(const sh of targets){if(!sh.alive||sh.sinking||b.hit.has(sh))continue;if(Math.abs(sh.pos.x-b.p.x)>sh.L||Math.abs(sh.pos.z-b.p.z)>sh.L)continue;if(hitTest(sh,b.p)){damage(sh,b.dmg,b.owner,b.p,b.o);b.hit.add(sh);if(!b.o.pierce){done=true;break;}}}}
-    if(!done&&!b.owner.isPlayer&&!b.o.visual&&inSafe(b.p.x,b.p.z)){glow.spawn(b.p.x,b.p.y,b.p.z,0,0,0,0.3,2,0.5,0.6,0.9,1,0.8,0,0);done=true;}
+    else{const esc=b.owner.isEscort;const targets=(b.owner.isPlayer||esc)?playerTargets():[player];
+      for(const sh of targets){if(!sh.alive||sh.sinking||b.hit.has(sh))continue;if(esc&&sh.isRemote)continue;if(Math.abs(sh.pos.x-b.p.x)>sh.L||Math.abs(sh.pos.z-b.p.z)>sh.L)continue;if(hitTest(sh,b.p)){damage(sh,b.dmg,esc?player:b.owner,b.p,b.o);b.hit.add(sh);if(!b.o.pierce){done=true;break;}}}}
+    if(!done&&!b.owner.isPlayer&&!b.owner.isEscort&&!b.o.visual&&inSafe(b.p.x,b.p.z)){glow.spawn(b.p.x,b.p.y,b.p.z,0,0,0,0.3,2,0.5,0.6,0.9,1,0.8,0,0);done=true;}
     if(!done&&b.p.y<1.5){for(const isl of islands){const d=Math.hypot(b.p.x-isl.x,b.p.z-isl.z);if(d<isl.R*0.85&&b.p.y<isl.h(b.p.x-isl.x,b.p.z-isl.z)+0.5){fxDust(b.p);done=true;break;}}}
     if(!done&&b.p.y<waveH(b.p.x,b.p.z)-0.2){if(nearCam(b.p))fxSplash(b.p.x,b.p.z,false);sfx('splash',vol3d(b.p)*0.8);done=true;}
     if(b.t>(b.o.big?7:4))done=true;
@@ -2732,7 +2735,7 @@ function updateHazards(dt){
       if(inSafe(sh.pos.x,sh.pos.z))continue;const d=Math.hypot(dx,dz);const Kc=sh.cls||SHIP_CLASSES[0];const wx=isSp?Kc.spout:Kc.whirl;
       if(h.type==='spout'){const R=h.r+sh.radius*0.6;if(d<R*1.3){const f=(1-d/(R*1.3))*h.f*wx;sh.angVel+=3.5*f*dt*(sh.isPlayer?1:0.6);sh.pos.x+=(-dz/(d||1))*7*f*dt-dx/(d||1)*3*f*dt;sh.pos.z+=(dx/(d||1))*7*f*dt-dz/(d||1)*3*f*dt;sh.spoutLift=Math.sin(T*6)*0.6*f+f*1.2;
           if(d<R)dot(sh,sh.maxHp*0.06*h.f*wx*dt);if(sh.isPlayer)camShake=Math.max(camShake,0.35*f);}else sh.spoutLift=0;}
-      else if(d<h.r){const f=1-d/h.r;const pull=Math.min(0.82*sh.speedMax,10*(0.35+0.65*f))*h.f*wx;sh.pos.x-=dx/(d||1)*pull*dt;sh.pos.z-=dz/(d||1)*pull*dt;
+      else if(d<h.r){const f=1-d/h.r;const pull=Math.min(0.82*sh.speedMax,14*(0.35+0.65*f))*h.f*wx;sh.pos.x-=dx/(d||1)*pull*dt;sh.pos.z-=dz/(d||1)*pull*dt;
         const sw=5*(0.3+f)*h.f*wx;sh.pos.x+=(-dz/(d||1))*sw*dt;sh.pos.z+=(dx/(d||1))*sw*dt;sh.angVel+=1.1*f*h.f*dt;
         dot(sh,sh.maxHp*0.03*h.f*wx*dt);}}
   }
@@ -3279,6 +3282,36 @@ function applyEvent(g,e){
 function showRemoteKraken(){const fake={pos:player.pos,heading:player.heading,W:player.W,H:player.H,tier:player.tier,alive:true,isRemote:false};const g=new THREE.Group();for(let i=0;i<5;i++){const a=i/5*6.283;const R=player.W*0.5+3;const ox=Math.cos(a),oz=Math.sin(a);const pts=[new V3(ox*(R+4),-3,oz*(R+4)),new V3(ox*(R+2),5+player.H,oz*(R+2)),new V3(ox*R*0.5,8+player.H,oz*R*0.5),new V3(-ox*R*0.3,4+player.H*0.5,-oz*R*0.3),new V3(-ox*R*0.7,1.5,-oz*R*0.7)];g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),28,0.9,7,false),tentMat));}
   g.position.copy(player.pos);g.scale.set(1,0.01,1);scene.add(g);krakens.push({g,t:Object.assign(fake,{get pos(){return player.pos;}}),time:0,tick:99,dmg:0});}
 function removeGhost(peer){const g=ghosts.get(peer);if(!g)return;scene.remove(g.root);disposeTree(g.root);if(g.hb)g.hb.remove();ghosts.delete(peer);NET.lastEv.delete(peer);}
+/* ---- hayalet filo: Siyah İnci kaptanına eşlik eden iki hayalet gemi ----
+   Oyuncunun arkasında iki yanda üçgen düzende yol alır, oyuncunun hedeflerine bordadan ateş eder.
+   Hayalet oldukları için düşman gülleleri içlerinden geçer; batırdıkları gemilerin ganimeti oyuncuya yazılır. */
+const escorts=[];const LEG_CI=SHIP_CLASSES.findIndex(K=>K.locked);
+function escortWanted(){return playing&&player&&player.alive&&player.ci===LEG_CI&&legOwned();}
+function escortSlot(i){const side=i?-1:1;const lat=side*(player.L*0.55+player.W*1.2+9),back=player.L*0.8+11;const h=player.heading,s=Math.sin(h),c=Math.cos(h);
+  return [player.pos.x+c*lat-s*back,player.pos.z-s*lat-c*back];}
+function escortStats(e){e.speedMax=player.speedMax*1.22;e.dmg=Math.round(player.dmg*0.42*10)/10;e.reload=player.reload*1.15;e.range=player.range;e.level=player.level||save.level;}
+function spawnEscorts(){for(let i=0;i<2;i++){const q=escortSlot(i);
+    const e=new Ship({ci:LEG_CI,level:save.level,x:q[0],z:q[1],pal:player.pal,heading:player.heading,tierCap:Math.max(0,player.tier-1)});
+    e.isEscort=true;e.slot=i;escortStats(e);e.ghosted=true;e.model.body.traverse(c=>{if(c.isMesh)c.material=escortMat;});e.hp=e.maxHp;escorts.push(e);}}
+const escortMat=new THREE.MeshPhongMaterial({color:0xa8ffe6,emissive:0x1f8f74,emissiveIntensity:0.9,transparent:true,opacity:0.5,depthWrite:false,side:THREE.DoubleSide,shininess:40});escortMat.userData.shared=true;
+function clearEscorts(){for(const e of escorts){scene.remove(e.root);disposeTree(e.root);}escorts.length=0;}
+function updateEscorts(dt){
+  if(!escortWanted()){if(escorts.length)clearEscorts();return;}
+  if(!escorts.length){spawnEscorts();for(const e of escorts)for(let k=0;k<14;k++)smoke.spawn(e.pos.x+rnd(-6,6),rnd(0,4),e.pos.z+rnd(-6,6),0,rnd(0.5,1.5),0,1.2,2.4,4,0.55,0.95,0.85,0.5,0,0);}
+  for(const e of escorts){escortStats(e);const q=escortSlot(e.slot);const lead=0.6;const tx=q[0]+player.vel.x*lead,tz=q[1]+player.vel.z*lead;
+    const dx=tx-e.pos.x,dz=tz-e.pos.z;const d=Math.hypot(dx,dz);
+    if(d>240||portOpen){e.pos.set(q[0],0,q[1]);e.heading=player.heading;e.speed=player.speed;e.angVel=0;continue;}
+    const want=d>9?Math.atan2(dx,dz):player.heading;const diff=wrapA(want-e.heading);
+    const ahead=dx*Math.sin(e.heading)+dz*Math.cos(e.heading);
+    let thr=clamp((Math.abs(player.speed)+ahead*0.9)/e.speedMax,0,1);if(Math.abs(diff)>1.6&&d<40)thr=Math.min(thr,0.25);
+    shipPhysics(e,thr,clamp(diff*2.2,-1,1),dt);
+    // keep clear of the flagship hull
+    const px=e.pos.x-player.pos.x,pz=e.pos.z-player.pos.z,pd=Math.hypot(px,pz),mn=player.radius+e.radius+2;if(pd<mn&&pd>0.01){e.pos.x+=px/pd*(mn-pd);e.pos.z+=pz/pd*(mn-pd);}
+    if(e.root.visible&&Math.random()<dt*3)smoke.spawn(e.pos.x+rnd(-e.L*0.4,e.L*0.4),rnd(0.5,3),e.pos.z+rnd(-e.L*0.4,e.L*0.4),0,rnd(0.3,0.9),0,0.9,1.8,3.5,0.55,0.95,0.85,0.28,0,0);
+    if(currentPort)continue;
+    for(let s2=0;s2<2;s2++){e.cd[s2]-=dt;if(e.cd[s2]>0)continue;let best=null,bd=1e9;
+      for(const t of playerTargets()){if(t.isRemote)continue;if(!inArc(e,t.pos.x,t.pos.z,s2))continue;const dd=Math.hypot(t.pos.x-e.pos.x,t.pos.z-e.pos.z);if(dd<bd){bd=dd;best=t;}}
+      if(best)fireBroadside(e,s2,best);else e.cd[s2]=0.25;}}}
 function updateGhost(g,dt){
   if(g.sinking){if(g.sinkT>8)g.root.visible=false;return;}
   const ox=g.pos.x,oz=g.pos.z;let tx,tz,th;
@@ -3355,7 +3388,8 @@ function updateCamera(dt){
   CAMD=Math.hypot(camPos.y,camPos.z-camLook.z,camPos.x-camLook.x);
   // the shadow box grows with the view so distant towers and ships still cast shadows
   const sh=clamp(Math.round(CAMD*1.25/10)*10,130,320);if(sh!==shadowHalf){shadowHalf=sh;const c=sun.shadow.camera;c.left=-sh;c.right=sh;c.top=sh;c.bottom=-sh;c.far=2*(sh+170);c.updateProjectionMatrix();}
-  const sd=shadowHalf+170;sun.position.set(camLook.x+SUN_DIR.x*sd,SUN_DIR.y*sd,camLook.z+SUN_DIR.z*sd);sun.target.position.set(camLook.x,0,camLook.z);
+  const sd=shadowHalf+170;{const tx=2*shadowHalf/sun.shadow.mapSize.x;const a=camLook.x*SH_R.x+camLook.z*SH_R.z,b=camLook.x*SH_U.x+camLook.z*SH_U.z;const da=Math.round(a/tx)*tx-a,db=Math.round(b/tx)*tx-b;
+    const px=camLook.x+SH_R.x*da+SH_U.x*db,py=SH_U.y*db,pz=camLook.z+SH_R.z*da+SH_U.z*db;sun.position.set(px+SUN_DIR.x*sd,py+SUN_DIR.y*sd,pz+SUN_DIR.z*sd);sun.target.position.set(px,py,pz);}
   ocean.position.set(Math.round(player.pos.x/12)*12,0,Math.round(player.pos.z/12)*12);
 }
 
@@ -3656,7 +3690,8 @@ const GradeShader={uniforms:{tDiffuse:{value:null},uStorm:{value:0},uTime:{value
 function setupPost(){
   composer=null;
   if(!quality||!THREE.EffectComposer||!THREE.UnrealBloomPass||!THREE.ShaderPass||!THREE.RenderPass)return;
-  try{composer=new THREE.EffectComposer(renderer);composer.setPixelRatio(renderer.getPixelRatio());composer.setSize(innerWidth,innerHeight);
+  try{let rt;if(renderer.capabilities.isWebGL2&&THREE.WebGLMultisampleRenderTarget){const sz=renderer.getDrawingBufferSize(new THREE.Vector2());rt=new THREE.WebGLMultisampleRenderTarget(sz.x,sz.y,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,format:THREE.RGBAFormat});rt.samples=4;}
+    composer=new THREE.EffectComposer(renderer,rt);composer.setPixelRatio(renderer.getPixelRatio());composer.setSize(innerWidth,innerHeight);
     composer.addPass(new THREE.RenderPass(scene,camera));
     bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),0.5,0.4,0.985);composer.addPass(bloomPass);
     gradePass=new THREE.ShaderPass(GradeShader);composer.addPass(gradePass);}catch(e){composer=null;}
@@ -3691,7 +3726,7 @@ function updateGulls(dt){
 /* ================= MAIN LOOP ================= */
 let playing=false;
 function resize(){
-  const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=w/h<1?55:42;camera.updateProjectionMatrix();
+  const w=innerWidth,h=innerHeight;{const ob=PERF.base;perfBase();if(Math.abs(ob-PERF.base)>0.01)renderer.setPixelRatio(PERF.base*PERF.scale);}renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=w/h<1?55:42;camera.updateProjectionMatrix();
   const sc=renderer.domElement.height/(2*Math.tan(camera.fov*Math.PI/360));if(smoke){smoke.mat.uniforms.uScale.value=sc;glow.mat.uniforms.uScale.value=sc;if(fire)fire.mat.uniforms.uScale.value=sc;}
   rainC.width=Math.round(w);rainC.height=Math.round(h);
   if(composer){composer.setPixelRatio(renderer.getPixelRatio());composer.setSize(w,h);}
@@ -3712,6 +3747,7 @@ function frame(now){
     /* uzak düşmanlar 4 Hz düşünür; "uzak" = odadaki en yakın kaptana göre (host başkalarının yanındaki düşmanları da akıcı yönetsin) */
     for(const e of enemies){if(e.netE){if(e.alive)updateNetEnemy(e,dt);else if(performance.now()-(e.netSeen||0)>2500)e.netDrop=true;continue;}
       if(e.alive){const far=minPlayerDist(e)>700;if(far){e.think-=dt;if(e.think>0)continue;e.think=0.25;updateEnemy(e,0.25,true);}else updateEnemy(e,dt,false);}}
+    updateEscorts(dt);
     processPending();
     if(!NETE.client)for(let i=respawnQueue.length-1;i>=0;i--)if(T>respawnQueue[i].at){if(spawnSpec(respawnQueue[i].spec,260))respawnQueue.splice(i,1);else respawnQueue[i].at=T+5;}
     updateUltis(dt);updateBursts(dt);updateLoot(dt);updatePort(dt);
@@ -3720,7 +3756,8 @@ function frame(now){
   }else{player.speed=0;processPending();}
   updateCombatMusic(dt);updateDay(dt);updateWeather(dt);updateCastles(dt);pvFrame(dt);updateZone(dt);updateDolphins(dt);updateClouds(dt);
   for(const g of ghosts.values())updateGhost(g,dt);
-  const all=[player,...enemies,...ghosts.values()];
+  if(!playing&&escorts.length)clearEscorts();
+  const all=[player,...enemies,...ghosts.values(),...escorts];
   for(const sh of all){const d=Math.hypot(sh.pos.x-player.pos.x,sh.pos.z-player.pos.z);if(sh.lazy&&d<640)ensureModel(sh);sh.onScreen=d<330;sh.root.visible=!sh.lazy&&d<560&&!(sh.sinking&&sh.sinkT>8);if(sh.root.visible)shipVisual(sh,dt);if(!sh.spoutLift)sh.spoutLift=0;else sh.spoutLift*=Math.pow(0.1,dt);}
   for(let i=enemies.length-1;i>=0;i--){const e=enemies[i];if(e.sinking&&!e.root.visible)e.sinkT+=dt; // görünmeyen batık da zamanla silinsin
     if((e.sinking&&e.sinkT>7)||e.netDrop){scene.remove(e.root);disposeTree(e.root);if(e.hb)e.hb.remove();enemies.splice(i,1);if(e.netE)NETE.map.delete(e.nid);else NETE.byId.delete(e.nid);}}
@@ -3806,7 +3843,7 @@ $('clsTabs').addEventListener('click',e=>{const b=e.target.closest('[data-ci]');
   renderCls();pvRefresh();});
 $('clsInfo').addEventListener('click',e=>{if(e.target.closest('#legBuy')){if(!legQuestDone()||carried<LEG_PRICE||legOwned())return;carried-=LEG_PRICE;save.spent+=LEG_PRICE;save.legend=1;
     const li=SHIP_CLASSES.findIndex(K=>K.locked);save.cls=li;UIC=li;persist();if(player){player.ci=li;player.applyStats();player.hp=player.maxHp;player.rebuild();}hudDirty=true;
-    toast('<b>Kızıl Hayalet senin!</b> Efsanevi gemin denize indirildi.','good');renderCls();pvRefresh();if(typeof celebrate==='function')celebrate(true);return;}
+    toast('<b>Siyah İnci senin!</b> Efsanevi gemin iki hayalet gemiyle denize indirildi.','good');renderCls();pvRefresh();if(typeof celebrate==='function')celebrate(true);return;}
   if(!e.target.closest('#btn3d'))return;const b=$('customBox');b.hidden=false;renderCustom();b.scrollIntoView({block:'nearest',behavior:'smooth'});});
 renderCls();
 $('btnCustom').addEventListener('click',()=>{const b=$('customBox');b.hidden=!b.hidden;if(!b.hidden)renderCustom();});
@@ -3906,9 +3943,9 @@ boot();
 <script>
 (function(){
   const LATEST='https://raw.githubusercontent.com/goko34/LostOcean-updates/main/latest.json';
-  fetch('version.json',{cache:'no-store'}).then(r=>r.json()).then(v=>{const t=document.getElementById('verTag');if(t&&v.version)t.textContent=' · güncelleme '+v.version;}).catch(()=>{});
   const C=window.Capacitor;
   if(!C)return; /* tarayıcıda: güncelleyici yok */
+  fetch('version.json',{cache:'no-store'}).then(r=>r.json()).then(v=>{const t=document.getElementById('verTag');if(t&&v.version)t.textContent=' · güncelleme '+v.version;}).catch(()=>{});
   /* eklentinin kendisi varsa yerel uygulamadayız (isNativePlatform her sürümde tanımlı olmayabilir) */
   const U=(C.Plugins&&C.Plugins.CapacitorUpdater)||(C.registerPlugin&&C.registerPlugin('CapacitorUpdater'));
   if(!U){const t=document.getElementById('verTag');if(t)t.dataset.noota='1';setTimeout(()=>{if(t)t.textContent+=' (güncelleyici yok)';},800);return;}
